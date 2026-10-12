@@ -241,6 +241,10 @@
                 </div>
 
                 <div class="flex flex-wrap items-center gap-2">
+                    <button onclick="appState.fetchCloudData()" class="bg-indigo-600 hover:bg-indigo-700 text-white px-3 py-1.5 rounded-xl text-xs sm:text-sm font-semibold shadow-sm transition flex items-center justify-center space-x-1.5 active:scale-95">
+                        <i class="fa-solid fa-rotate text-xs"></i>
+                        <span>Refresh</span>
+                    </button>
                     <button onclick="appState.exportExcel()" class="flex-1 sm:flex-none bg-emerald-600 hover:bg-emerald-700 text-white px-3 py-1.5 rounded-xl text-xs sm:text-sm font-semibold shadow-sm transition flex items-center justify-center space-x-1.5 active:scale-95">
                         <i class="fa-solid fa-file-excel"></i>
                         <span>Excel</span>
@@ -271,7 +275,7 @@
                         </thead>
                         <tbody id="studentResultsTableBody" class="divide-y divide-gray-200 text-xs sm:text-sm bg-white">
                             <tr>
-                                <td colspan="6" class="p-6 text-center text-gray-500">Memuat data rekap nilai...</td>
+                                <td colspan="6" class="p-6 text-center text-gray-500"><i class="fa-solid fa-spinner fa-spin text-indigo-600 mr-2"></i> Mengambil data terbaru dari Google Sheets...</td>
                             </tr>
                         </tbody>
                     </table>
@@ -280,7 +284,7 @@
 
             <div class="bg-gray-50 px-4 sm:px-6 py-3 border-t flex flex-col sm:flex-row justify-between items-center text-[11px] sm:text-xs text-gray-500 gap-1">
                 <span id="totalStudentsCount">Total Siswa Terdata: 0</span>
-                <span class="text-indigo-600 font-semibold flex items-center"><i class="fa-solid fa-cloud-arrow-up mr-1"></i> Google Sheets Sinkron Otomatis</span>
+                <span class="text-indigo-600 font-semibold flex items-center"><i class="fa-solid fa-cloud-arrow-down mr-1"></i> Cloud Real-Time Active</span>
             </div>
         </div>
     </div>
@@ -402,8 +406,8 @@
                 this.currentIndex = 0;
                 this.score = 0;
                 this.correctCount = 0;
-                this.resultsStorageKey = "kuis_sd_student_scores_local";
-                this.sheetsURL = "https://script.google.com/macros/s/AKfycbxQzUlyFJhx4UD8nNtHjuHalrw7TU6JSDyrTyrt-3XNwW3e__xItqlXbnFkWdCg97c/exec";
+                this.cloudResults = [];
+                this.sheetsURL = "https://script.google.com/macros/s/AKfycbzh0yMJezt4n1fFz5gfUgmDPsSOBMs_aQ9dbRVMpI2ZBqFPPVrWL_uobdZFHigcwl4/exec";
             }
 
             toggleAudio() {
@@ -588,43 +592,26 @@
                     speakText("Tetap semangat belajar! Coba lagi ya.");
                 }
 
-                // Save to LocalStorage & Google Sheets
                 this.saveResultToCloud({
-                    waktu: new Date().toLocaleString('id-ID'),
                     nama: this.studentName,
                     kelas: `Kelas ${this.currentGrade}`,
-                    gradeNum: this.currentGrade,
-                    skor: this.score,
+                    nilai: this.score,
                     benar: this.correctCount,
-                    total: total,
-                    status: this.score >= 70 ? 'Lulus' : 'Remedial'
+                    salah: total - this.correctCount
                 });
             }
 
-            saveResultToCloud(resultData) {
-                // Save locally for immediate dashboard display
-                let allResults = JSON.parse(localStorage.getItem(this.resultsStorageKey)) || [];
-                allResults.unshift(resultData);
-                localStorage.setItem(this.resultsStorageKey, JSON.stringify(allResults));
-
-                // Send to Google Sheets Web App
+            saveResultToCloud(payload) {
                 fetch(this.sheetsURL, {
                     method: 'POST',
                     mode: 'no-cors',
-                    headers: {
-                        'Content-Type': 'application/json'
-                    },
-                    body: JSON.stringify({
-                        nama: resultData.nama,
-                        kelas: resultData.kelas,
-                        nilai: resultData.skor,
-                        benar: resultData.benar,
-                        salah: resultData.total - resultData.benar
-                    })
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
                 }).then(() => {
-                    console.log("Data berhasil disinkronkan ke Google Sheets!");
+                    console.log("Data berhasil dikirim ke Google Sheets!");
+                    setTimeout(() => this.fetchCloudData(), 1500);
                 }).catch(err => {
-                    console.error("Gagal sinkron ke Google Sheets:", err);
+                    console.error("Gagal mengirim data:", err);
                 });
             }
 
@@ -636,7 +623,7 @@
             openTeacherModal() {
                 playSound('click');
                 document.getElementById('teacherModal').classList.remove('hidden');
-                this.renderDashboardTable();
+                this.fetchCloudData();
             }
 
             closeTeacherModal() {
@@ -644,20 +631,39 @@
                 document.getElementById('teacherModal').classList.add('hidden');
             }
 
+            fetchCloudData() {
+                const tbody = document.getElementById('studentResultsTableBody');
+                tbody.innerHTML = `<tr><td colspan="6" class="p-6 text-center text-gray-500"><i class="fa-solid fa-spinner fa-spin text-indigo-600 mr-2"></i> Mengambil data terbaru dari cloud Google Sheets...</td></tr>`;
+
+                fetch(this.sheetsURL)
+                    .then(res => res.json())
+                    .then(data => {
+                        if (Array.isArray(data)) {
+                            this.cloudResults = data.reverse();
+                            this.renderDashboardTable();
+                        } else {
+                            tbody.innerHTML = `<tr><td colspan="6" class="p-6 text-center text-red-500">Gagal memuat data dari cloud.</td></tr>`;
+                        }
+                    })
+                    .catch(err => {
+                        console.error("Error fetching data:", err);
+                        tbody.innerHTML = `<tr><td colspan="6" class="p-6 text-center text-red-500">Gagal terhubung ke Google Sheets. Pastikan Apps Script sudah di-deploy sebagai Web App.</td></tr>`;
+                    });
+            }
+
             renderDashboardTable() {
                 const filter = document.getElementById('filterGrade').value;
                 const tbody = document.getElementById('studentResultsTableBody');
-                let allResults = JSON.parse(localStorage.getItem(this.resultsStorageKey)) || [];
 
-                let filtered = allResults;
+                let filtered = this.cloudResults;
                 if (filter !== 'all') {
-                    filtered = allResults.filter(item => item.gradeNum == filter);
+                    filtered = this.cloudResults.filter(item => item.gradeNum == filter);
                 }
 
                 document.getElementById('totalStudentsCount').innerText = `Total Siswa Terdata: ${filtered.length}`;
 
                 if (filtered.length === 0) {
-                    tbody.innerHTML = `<tr><td colspan="6" class="p-6 text-center text-gray-500">Belum ada data nilai murid yang tersimpan.</td></tr>`;
+                    tbody.innerHTML = `<tr><td colspan="6" class="p-6 text-center text-gray-500">Belum ada data nilai murid yang tersimpan di Google Sheets.</td></tr>`;
                     return;
                 }
 
@@ -680,14 +686,13 @@
 
             exportExcel() {
                 playSound('click');
-                let allResults = JSON.parse(localStorage.getItem(this.resultsStorageKey)) || [];
-                if (allResults.length === 0) {
+                if (this.cloudResults.length === 0) {
                     this.showAlert("Informasi", "Belum ada data untuk diunduh.", "error");
                     return;
                 }
 
                 let csv = "Waktu,Nama Siswa,Kelas,Skor,Benar,Total,Status\n";
-                allResults.forEach(r => {
+                this.cloudResults.forEach(r => {
                     csv += `"${r.waktu}","${r.nama}","${r.kelas}",${r.skor},${r.benar},${r.total},"${r.status}"\n`;
                 });
 
@@ -702,8 +707,7 @@
 
             exportWord() {
                 playSound('click');
-                let allResults = JSON.parse(localStorage.getItem(this.resultsStorageKey)) || [];
-                if (allResults.length === 0) {
+                if (this.cloudResults.length === 0) {
                     this.showAlert("Informasi", "Belum ada data untuk diunduh.", "error");
                     return;
                 }
@@ -712,7 +716,7 @@
                 htmlContent += `<h2 style="text-align:center; color:#4f46e5;">Rekap Nilai Kuis Ceria Bahasa Indonesia SD</h2>`;
                 htmlContent += `<table border="1" cellspacing="0" cellpadding="8" style="width:100%; border-collapse:collapse;">`;
                 htmlContent += `<tr style="background:#e0e7ff; color:#312e81;"><th>Waktu</th><th>Nama Siswa</th><th>Kelas</th><th>Skor</th><th>Benar/Total</th><th>Status</th></tr>`;
-                allResults.forEach(r => {
+                this.cloudResults.forEach(r => {
                     htmlContent += `<tr><td>${r.waktu}</td><td><b>${r.nama}</b></td><td>${r.kelas}</td><td>${r.skor}</td><td>${r.benar}/${r.total}</td><td>${r.status}</td></tr>`;
                 });
                 htmlContent += `</table></body></html>`;
